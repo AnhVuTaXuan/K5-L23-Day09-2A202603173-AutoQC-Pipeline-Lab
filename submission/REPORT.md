@@ -40,7 +40,23 @@ Chạy `pipeline.calibrate` trên `data/calib/` (39 ảnh có đáp án `MANIFES
 3. **Ảnh trùng biến đổi mạnh (`phash > 10`) và box lỏng nhẹ (`0.50 <= IoU < 0.75`):** Ngay trên `calib`, `phash_dist = 10` vẫn bỏ sót 2/6 ảnh gần trùng biến đổi mạnh (không thể nâng lên `16` do xoá nhầm ảnh sạch), và `iou_loose = 0.5` khiến các box lệch nhẹ (IoU `0.55–0.70`) lọt qua không cảnh báo.
 
 ## 5. Train: raw vs clean (tùy chọn, chấm riêng)
-Chưa chạy (đang hoàn tất phần lõi trước khi push lên GitHub và chạy notebook `notebooks/day09_train_compare.ipynb` trên Google Colab T4 GPU với 2 seed cho `raw` và `clean`). Sẽ cập nhật bảng `submission/results/comparison.md` và phân tích độ nhiễu giữa các seed sau khi hoàn thành bước train Colab.
+Thí nghiệm công bằng chạy trên Google Colab (Tesla T4 GPU): cùng model khởi tạo `yolo26n.pt`, `20` epoch, `imgsz=640`, `batch=16`, `2` seed (`0, 1`), cùng `val` (`data/gold_val`, 40 ảnh) và đánh giá trên cùng `data/test` (100 ảnh, 387 instances). Bảng tổng hợp từ `submission/results/comparison.md`:
+
+| biến thể | #ảnh train | số seed | map50 (TB ± độ lệch) | map50_95 (TB ± độ lệch) | precision (TB ± độ lệch) | recall (TB ± độ lệch) |
+|---|---|---|---|---|---|---|
+| raw | 224 | 2 | 0.726 ± 0.000 | 0.512 ± 0.004 | 0.764 ± 0.061 | 0.649 ± 0.028 |
+| clean | 202 | 2 | 0.701 ± 0.025 | 0.487 ± 0.008 | 0.759 ± 0.003 | 0.625 ± 0.019 |
+
+**Chênh lệch `mAP50 (clean − raw) = -0.025`** (`mAP50-95`: `-0.025`). Chi tiết từng seed (`raw`: `0.7256 / 0.7259`; `clean`: `0.7180 / 0.6832`) và AP50 trung bình theo lớp: `car` (`0.738` vs `0.738`), `person` (`0.823` vs `0.822`), `bus` (`0.703` vs `0.695`) ở `clean` đều **ngang bằng hoặc nhỉnh nhẹ hơn `raw`**, riêng lớp `truck` giảm mạnh từ `0.649` (`0.657/0.640`) xuống `0.538` (`0.590/0.486`).
+
+**Kết luận trung thực:** Không thể kết luận `clean` tốt hơn `raw`, đồng thời với chỉ 2 seed trên 100 ảnh test, mức chênh `-0.025` nằm **đúng trong độ nhiễu giữa các seed của `clean` (`± 0.025`)** — seed 0 của `clean` (`0.7180`) chỉ cách `raw` `-0.0076`, còn seed 1 (`0.6832`) bị kéo tụt chủ yếu bởi dao động mạnh ở lớp `truck` (`0.590 → 0.486`). Do đó **chưa đủ bằng chứng thống kê để kết luận chênh lệch thực chất**; giá trị rõ nhất của `clean` là loại bỏ rò rỉ test và làm Precision ổn định hơn hẳn giữa các seed (`± 0.003` so với `± 0.061` ở `raw`).
+
+**Nguyên nhân có thể và cách kiểm chứng:**
+1. **Rò rỉ tập test trong `raw` (`LEAK_TEST = 5` ảnh) thổi phồng giả metric của `raw`:** `raw` chứa 5 ảnh trùng trực tiếp với `data/test` (`test_009, 033, 039, 044, 085` — chiếm 5% tập test), khiến model `raw` học thuộc một phần đề thi trong khi `clean` đã loại sạch. *Cách kiểm:* Đánh giá lại cả hai model trên 95 ảnh test còn lại (bỏ 5 ảnh rò rỉ), hoặc train thêm biến thể `raw_noleak`.
+2. **Lớp `truck` rất ít mẫu (`41` box trong `class_stats.csv`) và nhạy với nhiễu seed/nhãn:** Sau khi loại 22 ảnh lỗi/trùng/rò rỉ (224 → 202 ảnh), số mẫu `truck` nhỏ khiến AP50 của riêng lớp này biến động `0.104` giữa 2 seed, đồng thời ranh giới `car ↔ truck` vẫn còn 3 cảnh báo ở `07_error_list_v3.txt`. *Cách kiểm:* Chạy ≥ 5 seed (seed `0..4`), tăng lên `40` epoch và so với chặn trên `oracle` (toàn bộ 202 ảnh nhãn người).
+3. **`clean` mới là bản nháp `Hold` (chưa sạch hoàn toàn) và Ultralytics tự bỏ dòng lỗi cú pháp của `raw`:** Do ngân sách duyệt giới hạn 80/125 ảnh, `clean` vẫn còn `38/202` ảnh mang cảnh báo chưa duyệt (`20 LOOSE_BOX`, `21 FALSE_POS`, `13 MISSING`); mặt khác khi train `raw`, Ultralytics tự lọc bỏ ảnh hỏng và dòng nhãn sai cú pháp (`BAD_FORMAT`, `BAD_CLASS_ID`, `BOX_ZERO`) nên lợi ích sửa cú pháp không thể hiện mạnh trên tập test 100 ảnh. *Cách kiểm:* Mở rộng ngân sách duyệt lên ≥ 99 ảnh để đạt `Release` (hoặc chạy biến thể `oracle`) rồi train lại cùng 5 seed.
+
+**Việc tiếp theo:** Duyệt bổ sung ≥ 19 ảnh cảnh báo còn lại để đưa `clean_v1` từ `Hold` sang `Release`, bổ sung thêm ảnh cho 2 lớp hiếm (`truck`: 41 box, `bus`: 32 box), và lặp lại thí nghiệm so sánh trên 95 ảnh test không rò rỉ với ≥ 5 seed.
 
 ## 6. Quyết định và ghi chú AI
 **(a) Quyết định cuối & điều kiện để thành Release:** Giữ nguyên kết luận **HOLD** (chỉ xuất bản nháp `clean_v1` để thử nghiệm train, **không** phát hành sản phẩm). Để chuyển sang **Release** (`warn_ratio < 10%`, tức `< 20/202` ảnh còn cảnh báo chưa duyệt), cần mở rộng ngân sách người duyệt thêm tối thiểu **19 ảnh nữa** (từ 80 lên **≥ 99 ảnh** trong hàng đợi 125 ảnh, ưu tiên các ca `POSSIBLE_MISSING`, `POSSIBLE_LOOSE_BOX` và `POSSIBLE_FALSE_POS` còn lại ở `07_error_list_v3.txt`) — tuyệt đối **không** kéo `second_opinion.conf > 0.85` để làm rỗng hàng đợi giả.
