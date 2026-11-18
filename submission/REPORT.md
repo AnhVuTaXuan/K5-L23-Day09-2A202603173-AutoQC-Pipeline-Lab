@@ -65,3 +65,20 @@ Thí nghiệm công bằng chạy trên Google Colab (Tesla T4 GPU): cùng model
 - **Prompt chính:** Cung cấp trực tiếp docstring vào/ra và danh sách test ca biên của từng module (`label_format.py`, `gate.py`, `autofix.py`, `second_opinion.py`), yêu cầu chỉ đọc/ghi trong `ds`, không sửa file khoá SHA-1, không đọc `data/test`/`MANIFEST.csv`, và lấy mọi ngưỡng từ `cfg`.
 - **Cách kiểm chứng code AI:** Chạy từng bộ unit test riêng (`pytest tests/test_<module>.py`, đạt 50/50), chạy toàn bộ 79 test gồm `test_pipeline_e2e.py`, kiểm tra trên `data/calib/` (tất cả lỗi cú pháp đạt P/R = 1.00), mở trực tiếp ảnh thật trên `data/raw` bằng `viz_labels.py` và chạy `scripts/check_submission.py`.
 - **Một lần AI/kịch bản gặp lỗi và cách xử lý:** Khi kiểm tra nhanh `second_opinion` trực tiếp trên `data/raw` (chưa qua `intake`) để khảo sát ngưỡng `conf`, lệnh gọi nhầm sang `ultralytics` do các ảnh hỏng chưa nằm trong `checker_preds.json` và vướng lỗi quyền đọc `/etc/os-release` trên Windows sandbox; đã sửa cách kiểm chứng bằng chạy qua luồng chuẩn `pipeline.run` (có `intake` lọc ảnh hỏng trước) và đối chiếu bằng bảng `pipeline.calibrate` + soi ảnh trực tiếp.
+
+**(c) Thưởng +2 — CVAT lọc box nhỏ (`width < 20`, 5 ảnh):**
+Đã tạo project CVAT từ `cvat/labels.json`, import nhãn YOLO 1.1 của 5 ảnh (ảnh đầu hàng đợi `img_0020` + đủ 4 ảnh có `BOX_TINY`) và lọc bằng quy tắc `Objects -> Width < 20`. Ảnh chụp lưu tại `submission/reports/cvat/` (`cvat_img_0020.jpg`, `cvat_img_0026.jpg`, `cvat_img_0051.jpg`, `cvat_img_0069.jpg`, `cvat_img_0161.jpg`):
+
+| Ảnh | CVAT `width < 20` (số box) | Pipeline `BOX_TINY` (`< 12 px`) | Nhận xét khi soi mắt trên CVAT |
+|---|---:|---:|---|
+| `img_0020.jpg` | 4 (`person`: 15.0–19.5 px) | 0 | Cả 4 đều là người thật (1 trong xe buýt, 3 trên bến) → không xoá |
+| `img_0026.jpg` | 6 (`person`: 11.4–19.9 px) | 1 (dòng 6: 11.4 px) | 6 người đứng trên đồi cỏ thả diều đều hợp lệ → ngưỡng 20 px khá nhạy |
+| `img_0051.jpg` | 3 (`person`: 8.9–18.8 px) | 1 (dòng 5: 8.9 px) | 1 khách trên tầng 2 xe buýt + 2 người sát mép trái (box 8.9 px bị cắt mạnh) |
+| `img_0069.jpg` | 2 (`person`: 11.2, 15.0 px) | 1 (dòng 2: 11.2 px) | **Phát hiện thêm lỗi thật:** cả 2 box đều là **cột tín hiệu đường sắt** gán nhầm thành `person` (pipeline chỉ bắt được box 11.2 px, sót box 15.0 px) |
+| `img_0161.jpg` | 3 (`person`: 10.3–11.9 px) | 3 (dòng 2–4: 10.3–11.9 px) | Khớp 3/3 với `BOX_TINY`: 3 người đi bộ phía xa trong hành lang chợ |
+
+- **Đối chiếu ngưỡng 12 px vs 20 px:** Cả 6/6 box `BOX_TINY` (< 12 px) của pipeline đều là tập con trong 18 box khớp `width < 20` của CVAT. Vì cả 18 box đều là lớp `person` đứng dọc (cao 22–55 px, rộng hẹp), ngưỡng 20 px của CVAT bắt dư nhiều người thật (không được xoá hàng loạt mù quáng), nhưng bù lại giúp mắt người phát hiện thêm ca báo động giả mà ngưỡng 12 px bỏ sót (`img_0069`, box cột tín hiệu rộng 15.0 px).
+- **Thuộc tính `can_review`:** Người gán tích `can_review=true` trên CVAT cho các box mơ hồ/khó phân biệt (như người ngồi trong cửa kính xe buýt ở `img_0020` hay vật giống người ở `img_0069`) để QA lọc nhanh bằng `attr["can_review"]==true`; trong pipeline tự động, vai trò tương đương là tập cảnh báo `WARN` (`second_opinion`, `BOX_TINY`, `NEEDS_LABEL`) được xếp hạng ưu tiên vào hàng đợi `05_review_queue.csv`.
+
+![CVAT filter width < 20 trên img_0069 (2 cột tín hiệu bị gán nhầm thành person)](reports/cvat/cvat_img_0069.jpg)
+![CVAT filter width < 20 trên img_0161 (khớp 3/3 BOX_TINY)](reports/cvat/cvat_img_0161.jpg)
