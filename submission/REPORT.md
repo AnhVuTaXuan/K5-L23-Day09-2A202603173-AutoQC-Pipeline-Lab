@@ -82,3 +82,6 @@ Thí nghiệm công bằng chạy trên Google Colab (Tesla T4 GPU): cùng model
 
 ![CVAT filter width < 20 trên img_0069 (2 cột tín hiệu bị gán nhầm thành person)](reports/cvat/cvat_img_0069.jpg)
 ![CVAT filter width < 20 trên img_0161 (khớp 3/3 BOX_TINY)](reports/cvat/cvat_img_0161.jpg)
+
+**(d) Thưởng +3 — Check mở rộng kiểm tra tỉ lệ khung hình (`BOX_EXTREME_AR`):**
+Đã bổ sung module `pipeline/checks/aspect_ratio.py` kèm bộ 7 unit test `tests/test_aspect_ratio.py` (tổng `pytest` đạt **86 passed**, không sửa các file khoá SHA-1 trong `_protected.json`). Check tính tỉ lệ cạnh dài/ngắn theo **pixel thật** (`ds.image_size(stem)`) để không bị méo trên ảnh không vuông, đọc ngưỡng `max_ratio` từ `cfg` (mặc định `6.0`), và chỉ phát cảnh báo mức `WARN`. Chạy thử trên 202 ảnh sau pipeline phát hiện **7 box bất thường** (tỉ lệ `6.59:1` đến `9.84:1`, ví dụ `img_0155:2` kích thước `13.5×133.2 px`, `img_0042:5` `25.1×240.8 px`, và `img_0030:9` `9.8×84.3 px` do bị cắt sát mép trái) — giúp phát hiện thêm các box quá mảnh mà `BOX_TINY` (`< 12 px`) không bắt hết.
